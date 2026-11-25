@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+.env
+.streamlit/secrets.toml
+.claude/
+.vscode/
+KPI69_K300969.xlsx
+KPI69_ready_for_dashboard.xlsx
+ai clean.xlsx
+Data Dictionary.xlsx
+*.pdf
