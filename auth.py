@@ -33,6 +33,10 @@ def login_page():
                 ok = st.form_submit_button("เข้าสู่ระบบ", type="primary", width="stretch")
             if ok:
                 u, p = _credentials()
+                if not (u and p):
+                    st.error("ยังไม่ได้ตั้งชื่อผู้ใช้/รหัสผ่าน: สร้างไฟล์ .streamlit/secrets.toml ตามตัวอย่างใน secrets.toml.example "
+                             "(หรือใส่ที่ Settings > Secrets บน Streamlit Cloud)", icon=":material/key:")
+                    st.stop()
                 if u and p and hmac.compare_digest(user.encode(), u.encode()) & hmac.compare_digest(pw.encode(), p.encode()):
                     st.session_state["auth"] = user
                     st.rerun()

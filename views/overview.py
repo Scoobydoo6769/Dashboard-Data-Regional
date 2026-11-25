@@ -3,9 +3,11 @@ from __future__ import annotations
 import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
+from plotly.subplots import make_subplots
 from charts import LINE_COLORS, MAP_ANCHORS, MAP_LABEL_POS, MAP_OUTSIDE, MAP_SCALE, MAP_TWEAK, gradient_colors, hex_rgb, load_map, map_data_uri, show, style_fig
-from data import CLOSED, LATE_SET, SUE, as_of, baht_m, be_date, get_data
+from data import CLOSED, LATE_SET, STATUSES, SUE, as_of, baht_m, be_date, get_data
 from filters import district_widget, fkey, fy_widget, in_fy, pretty_table, prev_years, reset_button
+from views.districts import STATUS_COLOR
 from theme import FONT, PALETTE, T, card_head, delta_pct, empty_state, insight, page_head, sk_card
 
 def page_overview():
@@ -162,11 +164,58 @@ def page_overview():
                   "โครงการแบ่งตามประเภท (จัดกลุ่มจากคำในชื่อโครงการ)")
         fig = go.Figure(go.Pie(labels=by_b.index, values=by_b.values, hole=.58, sort=False, marker_colors=PALETTE[:len(by_b)],
                                marker_line=dict(color="#fff", width=2), textinfo="percent", textposition="inside",
-                               textfont=dict(color="#fff", size=13),
+                               textfont=dict(color="#FFFFFF", size=13, family=FONT), insidetextfont=dict(color="#FFFFFF", size=13, family=FONT),
                                hovertemplate="%{label}: %{value:,.0f} บาท (%{percent})<extra></extra>"))
         style_fig(fig, 340)
         fig.update_layout(legend=dict(orientation="h", y=-0.05, x=0.5, xanchor="center", yanchor="top"))
         show(fig, "ov_pie")
+
+    # สัดส่วนสถานะโครงการ (Pie): ภาพรวมตามตัวกรอง / แยกรายอำเภอ / แยกรายปีงบประมาณ
+    with st.container(key="card_status_pie"):
+        mode = st.segmented_control("ดูสัดส่วนสถานะ", ["ภาพรวม", "แยกรายอำเภอ", "แยกรายปีงบประมาณ"], default="ภาพรวม",
+                                    key="ov_status_mode", label_visibility="collapsed") or "ภาพรวม"
+        cnt = lambda d: [int((d["status"] == st_).sum()) for st_ in STATUSES]
+        if mode == "ภาพรวม":
+            vals = cnt(cur)
+            tot = sum(vals)
+            late_pct = sum(v for v, st_ in zip(vals, STATUSES) if st_ in LATE_SET) / tot
+            card_head(f"จาก {tot:,} โครงการ เกินกำหนด {late_pct:.0%} · ปิดโครงการ {vals[STATUSES.index(CLOSED)] / tot:.0%}",
+                      f"สัดส่วนสถานะโครงการ — ปีงบประมาณ {lo}–{hi} · {'ทั้งจังหวัด' if dist == 'ทั้งจังหวัด' else 'อำเภอ' + dist}")
+            fig = go.Figure(go.Pie(labels=STATUSES, values=vals, hole=.55, sort=False, marker_colors=[STATUS_COLOR[x] for x in STATUSES],
+                                   marker_line=dict(color="#fff", width=2), text=[f"{v / tot:.1%}" if v / tot >= .02 else "" for v in vals],
+                                   textinfo="text", textposition="inside", textfont=dict(size=14, color="#FFFFFF", family=FONT), insidetextfont=dict(size=14, color="#FFFFFF", family=FONT),
+                                   hovertemplate="%{label}: %{value:,} โครงการ (%{percent})<extra></extra>"))
+            fig.add_annotation(text=f"<b>{tot:,}</b><br>โครงการ", x=.5, y=.5, showarrow=False, font=dict(size=16, family=FONT, color=T["NAVY"]))
+            style_fig(fig, 340)
+            fig.update_layout(legend=dict(orientation="v", y=.5, x=1.0, font_size=13))
+            show(fig, "ov_status_pie")
+        else:
+            by_dist = mode == "แยกรายอำเภอ"
+            base = allp if by_dist else cur
+            keys = sorted(base["district" if by_dist else "fy"].unique(), key=(lambda k: -len(base[base["district"] == k])) if by_dist else None)
+            card_head("สัดส่วนสถานะโครงการ " + ("แยกรายอำเภอ" if by_dist else "แยกรายปีงบประมาณ"),
+                      f"เปอร์เซ็นต์ของโครงการในแต่ละสถานะ ภายใน{'แต่ละอำเภอ' if by_dist else 'แต่ละปีงบประมาณ'} (ปีงบประมาณ {lo}–{hi}"
+                      + ("" if by_dist or dist == "ทั้งจังหวัด" else f" · อำเภอ{dist}") + ")")
+            ncol = 4
+            nrow = -(-len(keys) // ncol)
+            fig = make_subplots(rows=nrow, cols=ncol, specs=[[{"type": "domain"}] * ncol for _ in range(nrow)],
+                                subplot_titles=[f"{k} ({len(base[base['district' if by_dist else 'fy'] == k])})" for k in keys],
+                                vertical_spacing=.12)
+            for i, k in enumerate(keys):
+                d_ = base[base["district" if by_dist else "fy"] == k]
+                vals = cnt(d_)
+                tot = max(sum(vals), 1)
+                fig.add_trace(go.Pie(labels=STATUSES, values=vals, hole=.5, sort=False, marker_colors=[STATUS_COLOR[x] for x in STATUSES],
+                                     marker_line=dict(color="#fff", width=1.5), text=[f"{v / tot:.0%}" if v / tot >= .06 else "" for v in vals],
+                                     textinfo="text", textposition="inside", textfont=dict(size=11, color="#FFFFFF", family=FONT), insidetextfont=dict(size=11, color="#FFFFFF", family=FONT),
+                                     showlegend=(i == 0), hovertemplate=str(k) + " · %{label}: %{value:,} โครงการ (%{percent})<extra></extra>"),
+                              row=i // ncol + 1, col=i % ncol + 1)
+            style_fig(fig, 250 * nrow + 40)
+            fig.update_annotations(font=dict(size=13, family=FONT, color=T["NAVY"]))
+            fig.update_layout(margin=dict(l=4, r=8, t=34, b=4))   # เว้นที่ด้านบนให้ชื่อของวงกลมแถวแรก
+            fig.update_layout(legend=dict(orientation="h", y=-0.03, x=.5, xanchor="center", font_size=12))
+            show(fig, f"ov_status_pie_{mode}")
+            st.caption("ตัวเลขในวงเล็บหลังชื่อ = จำนวนโครงการ · ตัวเลขในวงกลมแสดงเฉพาะสัดส่วนที่ตั้งแต่ 6% ขึ้นไป (ชี้เมาส์เพื่อดูทั้งหมด)")
 
     # เงินอนุมัติ vs ยอดคงเหลือ รายอำเภอ (ระดับจังหวัดในช่วงปีที่เลือก)
     with st.container(key="card_dist_money"):
